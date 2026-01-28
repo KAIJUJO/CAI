@@ -1,0 +1,103 @@
+这是一个为您整理的 **CAI-System V2 项目数据资产与实施文档**。
+
+基于我们的对话历史以及 **LogicPro**、**VJP-S-IB**、**PAC Bench** 和 **MuCR** 等核心参考文献，这份文档明确了“感知层”与“推理层”的数据隔离策略，并详细规划了数据量级与合成操作。
+
+---
+
+# CAI-System V2 数据资产规格说明书
+
+**项目代号:** CAI-System (Causal Active Inference)
+**版本:** V2.0-Data-Spec
+**核心架构:** 脑眼分离 (Eye-Brain Decoupling) + 程序化推理 (Programmatic Reasoning)
+
+---
+
+## 1. 模块一：感知层 (Eye / Perception Layer)
+**核心目标**：训练 **VJP-S-IB (Spatial Information Bottleneck)** 编码器。
+**任务**：从像素中解耦出因果实体（Entity）与属性（Attribute），抑制背景噪声。模型必须学会“看”，但不需要学会“复杂的逻辑推理”。
+
+### 1.1 数据集配置 (Data Configuration)
+
+| 数据集名称 | 角色 | 原始来源 | **计划使用量** | 关键用途 | 引用来源 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **GQA** (Balanced) | **主力训练** | Scene Graph | **150,000** | 提供细粒度的场景图（Object-Attribute-Relation），训练基础的视觉符号提取能力。 | |
+| **IV-VQA** (Introspective) | **去偏特训** | Bias Mitigation | **60,000** | **核心数据**。包含“反事实对”（Counterfactual Pairs），用于训练 S-IB 的 VJP 梯度掩码，强迫模型关注前景因果特征。 | |
+| **SpuCo** | **验证集** | Validation | **5,000** | 用于监控训练过程中的 Spurious Correlation（虚假相关性）指标，防止过拟合背景。 | |
+| **VQA-CP v2** | **测试集** | Test | **全量** | 评估感知层是否克服了先验分布偏差（OOD Generalization）。 | |
+
+### 1.2 具体操作与预处理 (Operations)
+
+1.  **构造负样本对 (Negative Pairing):**
+    *   对于 IV-VQA 数据，构建三元组 `(Image, Question_Pos, Question_Neg)`。
+    *   *操作逻辑*：输入同一张图，针对正问题（答案为是）和负问题（答案为否，但涉及相同物体属性），计算 **VJP (Vector-Jacobian Products)** 梯度。
+    *   *训练目标*：最大化正负样本 VJP 掩码在“属性区域”的差异，最小化背景区域的信息流。
+
+2.  **S-IB 瓶颈注入:**
+    *   在 GQA 数据训练时，对非 VJP 高亮区域（即背景）施加高斯噪声或掩码，强迫编码器 $E(x)$ 丢弃背景信息，输出纯净的 Object-Centric Token。
+
+---
+
+## 2. 模块二：推理层 (Brain / Reasoning Layer)
+**核心目标**：训练 **LogicPro Policy + PURE Value Head**。
+**任务**：基于感知层输入的符号，执行多步逻辑推理和空间计算。
+**核心策略**：利用 GPT-4o 将现有数据集转化为 **LogicPro 格式**（Code + Golden Trace）。
+
+### 2.1 数据集配置 (Data Configuration)
+
+| 数据集名称 | 角色 | 原始来源 | **合成后数量** | LogicPro 合成策略与用途 | 引用来源 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **MathVista** (Geo/Func) | **核心攻坚** | Multimodal Math | **40,000** | **优先级最高**。利用 `sympy/numpy` 重写几何与函数题。训练模型处理 **PAC Bench** 所需的空间坐标、距离、体积计算逻辑。 | |
+| **CLEVR** | **冷启动** | Logic Logic | **50,000** | 用于训练基础的集合运算（Filter, Count, Exist）。逻辑简单，适合初期稳定 RL 训练。 | |
+| **ISO-Bench** | **流程推理** | Procedural | **10,000** | 针对长链条的步骤推理（Step A $\to$ Step B）。合成代码以构建“依赖图（Dependency Graph）”。 | |
+| **Geometry3K** | **补充训练** | Geometry | **5,000** | 补充纯几何定理的 Python 实现（如勾股定理、相似三角形判定）。 | |
+| **PAC Bench** (Train) | **微调** | Physical/Spatial | **5,000** | 将物理操作先决条件转化为 `if-else` 约束检查代码（如 `if cup.width > box.opening: return False`）。 | |
+
+*   **总数据量**：约 **110k** 条高质量 LogicPro 合成数据。
+
+### 2.2 具体操作：LogicPro 数据合成流水线 (Synthesis Pipeline)
+
+我们不直接使用原始数据集的 Text Answer，而是使用 **GPT-4o** 生成如下结构的 JSON 数据：
+
+1.  **输入**：原始 `(Image, Question, Answer)`。
+2.  **Prompt 指令**：
+    *   "请编写一个 Python 函数 `solve()` 来解决这个问题。"
+    *   "**Step 1 (Perception)**: 在代码注释中显式定义你从图中看到的变量（如 `angle_A = 30`）。"
+    *   "**Step 2 (Reasoning)**: 使用 Python 逻辑进行计算，不要直接 print 答案。"
+    *   "**Step 3 (Trace)**: 在关键步骤插入 `print(f'step_x_var={...}')` 以输出中间变量。"
+3.  **验证 (Verification)**：执行生成的代码。只有当 `Code_Output == Ground_Truth` 时，该数据才入库。
+4.  **PURE 格式化**：将代码执行打印的 Trace 作为 **Dense Reward** 的真值参考。
+
+**合成数据样例 (JSON 结构):**
+```json
+{
+  "question": "Calculate the area of the triangle...",
+  "program": "def solve():\n  base = 10 # extracted from image\n  height = 5\n  print(f'base={base}, height={height}')\n  return 0.5 * base * height",
+  "golden_trace": ["base=10, height=5", "area=25.0"],
+  "final_answer": 25.0
+}
+```
+
+---
+
+## 3. 模块三：执行与评估层 (Execution & Evaluation)
+**核心目标**：验证 CAI-System 的主动推理能力和最终性能。
+
+### 3.1 训练时的 RL 配置
+*   **EFE 模拟**：使用 PURE 训练出的 Min-Form Value Head 作为 EFE (Expected Free Energy) 的近似器。
+*   **动作空间**：`{Zoom(bbox), Crop(bbox), Generate_Code, Terminate}`。
+
+### 3.2 最终评测基准 (Final Benchmarks)
+
+| 基准名称 | 评测维度 | 预期优势 | 引用来源 |
+| :--- | :--- | :--- | :--- |
+| **PAC Bench** | **物理/空间执行力** | 考察物体属性（大小/形状）与操作的可行性。LogicPro 训练的空间逻辑将在此发挥最大作用。 | |
+| **MuCR** | **多模态因果推理** | 考察“反事实”推理能力。IV-VQA 训练的感知层将在此展现去偏效果。 | |
+| **MMMU** | **综合专家能力** | 作为 Baseline，证明系统没有因过度关注因果而丧失通用性。 | |
+
+---
+
+## 4. 总结与注意事项
+
+1.  **数据隔离**：严禁将 **MathVista** 或 **PAC Bench** 的测试集图片混入感知层（GQA/IV-VQA）的训练中，以防 Data Leakage。
+2.  **S-IB 训练细节**：在训练感知层时，必须使用 **VJP** 梯度来指导 Mask 的生成，确保“背景”确实是与任务无关的区域。
+3.  **LogicPro 质量控制**：合成代码必须通过解释器执行验证。对于 MathVista 中极其复杂的图表题，如果 GPT-4o 无法生成正确代码，直接丢弃该样本，宁缺毋滥。
