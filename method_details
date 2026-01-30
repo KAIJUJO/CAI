@@ -1,0 +1,80 @@
+这份技术细节文档整合了 S-IB (Spatial Information Bottleneck)、LogicPro/PIPS (Neuro-symbolic) 以及 PURE-GRPO (Reinforcement Learning) 的核心机制，构建了一个闭环的 因果主动推理系统 (Causal Active Inference System)。
+以下是完整的技术实施方案：
+项目代号：CAI-System (Causal Active Inference)
+技术规格说明书 (Technical Specification Document)
+1. 系统总体架构 (System Architecture)
+系统由四个串行耦合的流水线组成：
+感知层 (V1)：基于 VJP 的空间信息瓶颈编码器，负责像素级的因果解耦。
+推理层 (V2)：基于 PIPS 路由的神经符号推理引擎，动态选择代码执行或语言推理。
+训练层 (V3)：基于 PURE 算法的 Min-Form 信用分配策略优化器。
+执行层 (V4)：基于期望自由能 (EFE) 的主动感知规划循环。
+2. 模块一：感知层 (Gradient-Guided Causal Perception)
+目标：在特征提取阶段强制模型仅编码与任务因果相关的空间区域，消除背景混淆（如“草地”导致“狗”的误判）。
+2.1 核心算法：VJP-S-IB
+我们采用 Vector-Jacobian Products (VJP) 作为监督信号，利用反向传播的梯度流来定义“因果显著性”。
+前向传播 (Encoding)：
+输入图像 $X$，经过编码器 $E$ 得到特征图 $Z = E(X)$。
+预测类别 logits $Y = f(Z)$。
+反向解码 (VJP Decoding) 1, 2：
+计算 VJP：$G = \nabla_X Y = (\frac{\partial Y}{\partial Z})^T (\frac{\partial Z}{\partial X})^T v$。
+根据 1 的证明，VJP 构成了输入特征相对于类别标签的最小充分统计量 (Minimal Sufficient Statistics)。我们利用 $G$ 生成二值掩码 $M_{fg}$ (前景) 和 $M_{bg}$ (背景)。
+S-IB 优化目标：
+最大化前景 VJP 与输入的互信息，最小化背景 VJP 与输入的互信息：$$ \mathcal{L}{S-IB} = I(Z \odot M{fg}; Y) - \beta I(Z \odot M_{bg}; X) $$
+实施细节：在训练时，对背景区域 $Z \odot M_{bg}$ 施加高斯噪声或将其置零，强制模型无法从背景获取信息，从而避免“躺平” (Collapse) 1, 3。
+2.2 输出制品
+去偏视觉 Token：仅包含因果对象特征的 Tensor，背景噪声被数学性地切断。
+3. 模块二：推理层 (Adaptive Neuro-Symbolic Reasoning)
+目标：解决纯代码生成无法处理语义问题、纯 CoT 容易产生幻觉的问题。
+3.1 核心架构：PIPS Router (Per-Instance Program Synthesis) 4, 5
+引入一个轻量级分类器（Router），在推理前动态判断当前输入的“算法性 (Algorithmicity)”。
+置信度开关 (Confidence Switch)：
+基于 10 个维度的自省指标（如“形式化难易度”、“执行可行性”）4, 6。
+路由逻辑：
+分支 A (Symbolic)：如果 Is_Algorithmic(Query) > Threshold，调用 LogicPro 模块。
+分支 B (Semantic)：如果 Is_Algorithmic(Query) < Threshold，调用 Causal CoT 模块。
+3.2 数据合成引擎：LogicPro 7
+针对分支 A，我们不直接生成答案，而是合成可执行的 Python 代码。
+输入：多模态 Query（例如“图中三个积木的体积之和是多少？”）。
+LogicPro 流程：
+符号提取 (Symbol Extraction)：将视觉对象解析为 JSON 变量（blocks = [{'size': 10}, {'size': 20}...]）4。
+程序合成 (Program Synthesis)：生成利用上述变量计算结果的 Python 函数 7。
+中间变量注入：强制代码 print 关键中间步骤（如 print(f"step1_vol={vol}")），以此作为“思维链”的验证锚点 7。
+沙箱执行：在受限 Docker 环境中运行代码，获取最终答案 $A$。
+4. 模块三：策略优化 (PURE-GRPO Training)
+目标：消除 Process Reward Model (PRM) 训练中的 Reward Hacking（模型通过生成冗长废话骗取高分）。
+4.1 核心算法：PURE (Min-Form Credit Assignment) 8-10
+我们彻底摒弃传统的累加回报公式。
+传统公式 (Summation-Form)：$G_t = \sum_{k=t}^T \gamma^{k-t} r_k$。这会导致模型通过堆砌大量低质量但非负的步骤来刷分 10。
+PURE 公式 (Min-Form)：$$ G_t = \min(r_t, r_{t+1}, \dots, r_T) $$
+逻辑含义：一条推理链的价值由其最差的一步 (Weakest Link) 决定。只要未来任何一步出现错误（Reward=0），当前步的价值立即归零。
+优势：这迫使模型在每一步都必须保持高置信度，从而生成更短、更精炼的推理链。
+4.2 训练框架：GRPO (Group Relative Policy Optimization) 11
+组采样：对同一 Prompt 采样 $G=8$ 个输出。
+优势计算：结合 PURE 的 Min-Form 回报计算相对优势：$$ A_{i,t} = \frac{G_{i,t}^{\text{PURE}} - \text{mean}(G_{\text{group}, t}^{\text{PURE}})}{\text{std}(G_{\text{group}, t}^{\text{PURE}}) + \epsilon} $$
+辅助奖励：为了防止训练初期崩塌，混合 10% 的 Verifiable Reward (最终答案正确性) 10。
+4.3 动态奖励模型：DG-PRM 12
+为了支持 PURE，我们需要高精度的 PRM。我们采用 DG-PRM 架构，维护一个奖励树 (Reward Tree)，根据当前推理步的内容动态检索最相关的评价标准（如“逻辑一致性”、“计算准确性”），而非使用通用的打分模型 12, 13。
+5. 模块四：主动推理与规划 (Active Inference Loop)
+目标：在推理时动态决定是“继续观察/思考”还是“输出结果”。
+5.1 规划泛函：期望自由能 (EFE) 14
+我们将 PURE 训练好的 Value Head 视为 EFE 的近似估计器。
+EFE 定义：$G(\pi) \approx \underbrace{H(o|z, \pi)}{\text{Ambiguity}} + \underbrace{D{KL}Q(o|z, \pi) || P(o)}_{\text{Risk}}$。
+近似实现：
+Ambiguity (不确定性)：由 PURE 的 Min-Form Value 捕捉。如果 $V_{min}$ 较低，说明后续步骤存在高风险/不确定性，需要更多信息。
+Action Selection：
+生成候选动作集：{Zoom(x,y), Scroll, Answer}。
+利用 Policy Network 预测每个动作后的状态价值 $V_{PURE}$。
+选择 $V_{PURE}$ 最大的动作。
+终止条件：当 Answer 动作的 $V_{PURE}$ 超过设定阈值，或超过视觉动作的价值时，停止观察。
+6. 实施路线图 (Detailed Roadmap)
+阶段,关键动作,技术细节引用,验证指标
+Phase 1: 数据准备,使用 LogicPro 流程，基于 LeetCode 和 GSM8K 生成 500k 条“问题-代码-中间变量”数据。,"7, 15",代码执行通过率 > 95%
+Phase 2: 感知预训练,训练 VJP-S-IB 编码器。使用梯度掩码强制解耦背景。,"1, 2",Sufficiency Score (充分性分数) 提升
+Phase 3: 奖励模型,训练 DG-PRM。构建包含 4k+ 节点的奖励树，支持细粒度打分。,"12, 16",ProcessBench F1 Score > 60%
+Phase 4: 策略训练,使用 PURE + GRPO 进行 RL 微调。采用 Min-Form 优势函数。,"10, 17","Math-500 Pass@1, 响应长度 (越短越好)"
+Phase 5: 推理集成,部署 PIPS Router。集成所有模块，实测主动推理循环。,"4, 6",MuCR Benchmark 18
+7. 关键风险与对策
+VJP 计算开销：VJP 需要反向传播，推理时成本高。对策：仅在训练时使用 VJP 优化 S-IB，推理时只需前向传播，S-IB 保证了特征已经是解耦的 1。
+PURE 训练崩塌：Min-Form 过于严苛，初期可能导致 Reward 全为 0。对策：在 Warm-up 阶段使用 Summation-Form，或者混合 Verifiable Reward (Outcome Reward) 10。
+代码沙箱安全：LogicPro 生成的代码可能死循环。对策：设置严格的 timeout 和内存限制，禁止网络访问 19。
+
