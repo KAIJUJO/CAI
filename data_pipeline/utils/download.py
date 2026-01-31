@@ -36,8 +36,8 @@ def get_file_size(url: str, timeout: int = 30) -> Optional[int]:
 def download_file(
     url: str,
     dest_path: Path,
-    chunk_size: int = 8192,
-    timeout: int = 30,
+    chunk_size: int = 1024 * 1024,  # 1MB chunks for good balance
+    timeout: int = 120,  # Increased timeout for slow servers
     progress_callback: Optional[Callable[[int, int], None]] = None,
     show_progress: bool = True,
 ) -> bool:
@@ -101,8 +101,8 @@ def download_file(
 def download_with_resume(
     url: str,
     dest_path: Path,
-    chunk_size: int = 8192,
-    timeout: int = 30,
+    chunk_size: int = 1024 * 1024,  # 1MB chunks for good balance
+    timeout: int = 120,  # Increased timeout for slow servers
     show_progress: bool = True,
 ) -> bool:
     """
