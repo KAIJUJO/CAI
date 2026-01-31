@@ -1,0 +1,38 @@
+# CAI-System Data Configuration
+# Configuration for perception layer data preparation
+
+# Paths
+project_root: null  # Auto-detected
+data_dir: null  # Defaults to {project_root}/data
+
+# Common settings
+random_seed: 42
+num_workers: 4
+
+# GQA Dataset Configuration
+gqa:
+  # Official Stanford download URLs
+  questions_url: "https://downloads.cs.stanford.edu/nlp/data/gqa/questions1.2.zip"
+  images_url: "https://downloads.cs.stanford.edu/nlp/data/gqa/images.zip"
+  scene_graphs_url: "https://downloads.cs.stanford.edu/nlp/data/gqa/sceneGraphs.zip"
+  
+  # Sampling parameters
+  sample_size: 150000  # Target: 150k for perception training
+  balanced_only: true  # Use balanced split for higher quality
+  
+  # Scene graph filtering for diversity
+  min_objects: 2   # Minimum objects in scene
+  max_objects: 50  # Maximum to avoid overly complex scenes
+
+# IV-VQA Dataset Configuration
+ivvqa:
+  # GitHub repository for CausalVQA project
+  github_repo: "AgarwalVedika/CausalVQA"
+  data_drive_id: ""  # Google Drive ID if available
+  
+  # Sampling parameters
+  sample_size: 60000  # Target: 60k pairs for debiasing training
+  
+  # Pair building parameters
+  require_counterfactual: true  # Only samples with counterfactual pairs
+  min_pair_similarity: 0.3  # Minimum image similarity for valid pairs
