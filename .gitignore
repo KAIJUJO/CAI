@@ -1,0 +1,88 @@
+# CAI-System - Git Ignore Configuration
+
+# ============================================
+# Image Files (large binary files)
+# ============================================
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.webp
+
+# ============================================
+# Data Files (too large for git)
+# ============================================
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.rar
+
+# Raw data directories
+data/raw/
+data/processed/ivvqa_tiers/tier2_masks/
+data/processed/gqa_sib_150k.json
+# ============================================
+# Model Checkpoints
+# ============================================
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+outputs/
+
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+cai/
+
+# ============================================
+# IDE and Editor
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ============================================
+# Logs and Temp Files
+# ============================================
+*.log
+*.tmp
+*.temp
+wandb/
+
+# ============================================
+# Jupyter Notebooks
+# ============================================
+.ipynb_checkpoints/
